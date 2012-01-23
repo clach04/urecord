@@ -33,11 +33,16 @@ class Record(type):
 
     For defining generic methods which operate over a class of records, you can
     subclass :class:`RecordInstance` and pass this into :class:`Record`:
+    # python 2.2 can't handle generator expressions like:
+    #   return math.sqrt(sum(cmp ** 2 for cmp in self))
 
         >>> from urecord import RecordInstance
         >>> class EuVector(RecordInstance):
         ...     def magnitude(self):
-        ...         return math.sqrt(sum(cmp ** 2 for cmp in self))
+        ...         tmp_list = []
+        ...         for cmp in self:
+        ...             tmp_list.append(cmp ** 2)
+        ...         return math.sqrt(sum(tmp_list))
         >>> Vector2D = Record('x', 'y', name='Vector2D', instance=EuVector)
         >>> Vector3D = Record('x', 'y', 'z', name='Vector3D', instance=EuVector)
         >>> Vector2D(3, 4).magnitude()
@@ -130,12 +135,27 @@ class RecordInstance(tuple):
         for key, value in kwargs.iteritems():
             if key not in cls._fields:
                 raise TypeError("Unexpected argument %r" % key)
-            slot = slots[cls._fields.index(key)]
+            
+            try:
+                slot = slots[cls._fields.index(key)]
+            except AttributeError:
+                # tuple.index not present in py 2.2
+                for tmp_index, tmp_key  in enumerate(cls._fields):
+                    if tmp_key == key:
+                        slot = slots[tmp_index]
+                        break
             if slot[1] is not unassigned:
                 raise TypeError("Got two values for argument %r" % key)
             slot[1] = value
 
-        return tuple.__new__(cls, (slot[1] for slot in slots))
+        # second param is a generator object, this syntax not supported with Python 2.2
+        #return tuple.__new__(cls, (slot[1] for slot in slots))
+        tmp_gen = []
+        for slot in slots:
+            tmp_gen.append(slot[1])
+        tmp_res =  tuple.__new__(cls, tmp_gen)
+        #print 'DEBUG', tmp_res
+        return tmp_res
 
     def __repr__(self):
 
@@ -145,9 +165,13 @@ class RecordInstance(tuple):
             >>> Record('a', 'b', name='Pair')(1, 2)
             Pair(a=1, b=2)
         """
-
-        args = ', '.join('%s=%r' % (field, RecordInstance.__getitem__(self, i))
-                         for i, field in enumerate(self._fields))
+        
+        # 2nd param is generator object, again not supportedin 2.2
+        #args = ', '.join('%s=%r' % (field, RecordInstance.__getitem__(self, i)) for i, field in enumerate(self._fields))
+        tmp_gen = []
+        for i, field in enumerate(self._fields):
+            tmp_gen.append('%s=%r' % (field, RecordInstance.__getitem__(self, i)))
+        args = ', '.join(tmp_gen)
         return '%s(%s)' % (type(self).__name__, args)
 
     def _asdict(self):
@@ -209,11 +233,14 @@ class RecordInstance(tuple):
         different, but :meth:`_replace` still operates on the underlying record
         fields rather than the public interface.
         """
-
+        
+        tmp_gen = ()
+        for i, field in enumerate(self._fields):
+            tmp_gen = tmp_gen + (kwargs.get(field, RecordInstance.__getitem__(self, i)),)
         return RecordInstance.__new__(
             type(self),
-            *tuple(kwargs.get(field, RecordInstance.__getitem__(self, i))
-                   for i, field in enumerate(self._fields)))
+            #*tuple(kwargs.get(field, RecordInstance.__getitem__(self, i)) for i, field in enumerate(self._fields)))
+            *tmp_gen)
 
 
 def _get_tests():
@@ -221,3 +248,15 @@ def _get_tests():
 
     import doctest
     return doctest.DocTestSuite(optionflags=doctest.ELLIPSIS)
+
+
+def _test():
+    import doctest
+    # py 2.2 does not support 
+    #doctest.testmod()
+    import urecord
+    
+    return doctest.testmod(urecord)
+
+if __name__ == "__main__":
+    _test()
